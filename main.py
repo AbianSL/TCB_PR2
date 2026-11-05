@@ -1,5 +1,7 @@
+from src.csv_extractor import CsvExtractor
+
 def main():
-    print("SOY UNA TREMENDA ZANAHORIA GORDIDSIMA")
+    
 
 
 if __name__ == "__main__":
