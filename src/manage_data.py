@@ -35,3 +35,18 @@ def sigma_clip(y, nsigma=5):
             return keep
 
         keep[np.flatnonzero(keep)[bad]] = False
+
+def clean_data(rjd, y, sy, instrumento, nsigma=5):
+
+    keep = np.ones(len(y), dtype=bool)
+
+    for nombre in np.unique(instrumento):
+
+        mascara = instrumento == nombre
+        keep[mascara] = sigma_clip(y[mascara], nsigma)
+
+    print("\nMedidas originales:", len(y))
+    print("Medidas excluidas:", np.sum(~keep))
+    print("Medidas conservadas:", np.sum(keep))
+
+    return rjd[keep], y[keep], sy[keep], instrumento[keep]
