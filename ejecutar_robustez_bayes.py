@@ -1,6 +1,6 @@
 """Análisis bayesiano de robustez (Epsilon Eridani, RV global).
 
-Abre este archivo en Spyder y pulsa F5; no ejecutes main.py.
+Abre este archivo en Spyder y ejecútalo; no ejecutes main.py.
 """
 
 from pathlib import Path
@@ -13,7 +13,7 @@ if str(ROOT) not in sys.path:
 from src.model_data import main_robustez_bayes
 
 # ===========================================================
-# CONFIGURACIÓN: editar únicamente este apartado en Spyder.
+# CONFIGURACIÓN: editar únicamente este apartado.
 # ===========================================================
 MODO = "RESUMEN"  # "PRUEBA", "M0", "M1", "AMBOS", "RESUMEN"
 ESCENARIO = "BASE_SEMILLA_2"  # Opciones documentadas en la guia
