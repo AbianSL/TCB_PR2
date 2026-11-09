@@ -1,43 +1,40 @@
-from src.csv_extractor import CsvExtractor
-import src.manage_data as manage_data
-import src.analyse_data as analyse_data
-import src.figures as figures
-import src.model_data as model_data
-from src.lomb_scargle import analizar_lomb_scargle
+"""Entrada unica: analisis global RV/S_MW, GP y Nested Sampling desde cero.
+
+Para Spyder, cambiar MODO_POR_DEFECTO por "preciso" si se desea.
+"""
+import argparse
+
+import matplotlib
+matplotlib.use("Agg")
+
+from src import config
+from src.analisis import ANALISIS, crear
+from src.datos import leer_series
+from src.modelos import MODELOS
+
+
+def leer_argumentos():
+    p = argparse.ArgumentParser(description="Epsilon Eridani: RV, actividad y GP bayesiano")
+    p.add_argument("--analisis", nargs="+", choices=ANALISIS, default=list(ANALISIS))
+    p.add_argument("--semilla", type=int, default=42)
+    p.add_argument("--sin-apf", action="store_true", help="Excluye el instrumento APF de RV")
+    bayes = p.add_argument_group("opciones de bayes")
+    bayes.add_argument("--modo", choices=config.MUESTREO, default=config.MODO_POR_DEFECTO)
+    bayes.add_argument("--nlive", type=int, help="Puntos vivos (sustituye al modo)")
+    bayes.add_argument("--dlogz", type=float, help="Tolerancia de evidencia (sustituye al modo)")
+    bayes.add_argument("--modelos", nargs="+", choices=MODELOS, default=list(MODELOS))
+    bayes.add_argument("--priors-ampliados", action="store_true")
+    bayes.add_argument("--reanudar", metavar="CARPETA", help="Reanuda una ejecución anterior")
+    bayes.add_argument("--comprobar", action="store_true", help="Evalúa el GP sin muestrear")
+    return p.parse_args()
 
 
 def main():
-
-    # Leer las velocidades radiales
-    rjd_rv, rv, srv, instrumento_rv = manage_data.opendata("data/Epsilon_Eridani_RVdata.csv", "RV")
-
-    # Leer el índice de actividad
-    rjd_s, s, ss, instrumento_s = manage_data.opendata("data/Epsilon_Eridani_SMW.csv", "SMW")
-
-    # Copia de la actividad filtrada por instrumento
-    rjd_s_clean, s_clean, ss_clean, instrumento_s_clean = (manage_data.clean_data(rjd_s, s, ss, instrumento_s))
-
-    # Analisis completo Lomb-Scargle: RV, actividad, ventanas y tablas
-    analizar_lomb_scargle(
-        rjd_rv, rv, srv, instrumento_rv,
-        rjd_s, s, ss, instrumento_s,
-        rjd_s_clean, s_clean, ss_clean, instrumento_s_clean
-    )
-
-    # Describir ambas series
-    analyse_data.describe_data(rjd_rv, rv, srv, instrumento_rv, "RV (m/s)")
-    analyse_data.describe_data(rjd_s, s, ss, instrumento_s, "S_MW (adimensional)")
-
-    #Para ver cuantos puntos eliminamos por serie (5 sigmas)
-    analyse_data.inspect_outliers(rjd_rv, rv, instrumento_rv, "RV")
-    analyse_data.inspect_outliers(rjd_s, s, instrumento_s, "S_MW")
-
-    analyse_data.inspect_region(rjd_s, s, ss, instrumento_s,"HARPS03_1", 3304.69, 3304.74)
-    analyse_data.inspect_region(rjd_s, s, ss, instrumento_s,"ESPRESSO18_1", 8488, 8491)
-
-    # Representar la actividad
-    figures.plot_activity(rjd_s, s, ss, instrumento_s)
-    figures.plot_rv(rjd_rv, rv, srv, instrumento_rv)
+    args = leer_argumentos()
+    datos = leer_series(args.sin_apf)
+    for nombre in args.analisis:
+        print(f"\n== {nombre} ==")
+        crear(nombre, args).ejecutar(datos, config.DIRECTORIO_RESULTADOS / nombre)
 
 
 if __name__ == "__main__":
