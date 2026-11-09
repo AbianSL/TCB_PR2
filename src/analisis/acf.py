@@ -32,7 +32,6 @@ class ACF(Analisis):
             resultados[nombre_serie] = resultado
         self._guardar(datos, resultados, salida)
 
-    # ---------- cálculo ----------
     def _agrupar_pares_por_retardo(self, tiempos):
         """Agrupa los pares (a < b) por retardo; se reutilizan en las permutaciones."""
         tiempos = np.asarray(tiempos)

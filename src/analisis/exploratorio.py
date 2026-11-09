@@ -14,7 +14,6 @@ from src.estilos import (COLOR_ESPECTRO, COLOR_MODELO, COLOR_PERIODO_LIBRE,
 from src.lineal import ajustar_lineal, periodograma
 from src.utilidades import guardar_figura, guardar_tabla
 
-# Se busca primero el periodo largo, se retira, y luego el corto tras retirarlo.
 VENTANA_PERIODO_LARGO_DIAS = (200, 6000)
 VENTANA_PERIODO_CORTO_DIAS = (5, 25)
 # En S_MW el máximo global corto suele rondar 8 d. Para el ajuste ilustrativo se

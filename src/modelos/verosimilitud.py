@@ -24,7 +24,7 @@ class VerosimilitudGP:
     def __init__(self, serie, modelo, espacio):
         self.serie, self.modelo, self.espacio = serie, modelo, espacio
         self.matriz_diseno = matriz_diseno(serie)
-        # Las medianas instrumentales solo trasladan la RV; no se elimina nada.
+        
         self.medianas_instrumentales = np.array(
             [np.median(serie.valores[mascara]) for _, mascara in serie.instrumentos()])
         self.rv_centrada = (serie.valores
@@ -58,30 +58,35 @@ class VerosimilitudGP:
             parametros = self.espacio.como_diccionario(vector_parametros)
             jitter_por_medida = np.asarray(
                 vector_parametros[:n_instrumentos])[serie.indice_instrumento]
+            
             varianza_total = serie.errores_formales ** 2 + jitter_por_medida ** 2
             proceso_gaussiano = GaussianProcess(self._terminos_gp(parametros), mean=0.0)
             velocidad_orbital = self.modelo.velocidad_orbital(parametros, serie)
             rv_sin_orbita = self.rv_centrada - velocidad_orbital
+            
             proceso_gaussiano.compute(serie.tiempos, diag=varianza_total)
             inversa_aplicada = proceso_gaussiano.apply_inverse(
                 np.column_stack((rv_sin_orbita, matriz)))
             matriz_precision = (matriz.T @ inversa_aplicada[:, 1:]
                                 + np.diag(1.0 / self.sigma_prior_coeficientes ** 2))
             matriz_precision = (matriz_precision + matriz_precision.T) * 0.5
+            
             termino_lineal = matriz.T @ inversa_aplicada[:, 0]
             factor_cholesky = cho_factor(matriz_precision, lower=True, check_finite=False)
             coeficientes = cho_solve(factor_cholesky, termino_lineal, check_finite=False)
             ln_det_precision = 2.0 * np.sum(np.log(np.diag(factor_cholesky[0])))
+            
             ln_verosimilitud = (
                 proceso_gaussiano.log_likelihood(rv_sin_orbita)
                 + 0.5 * termino_lineal @ coeficientes
                 - 0.5 * (np.sum(np.log(self.sigma_prior_coeficientes ** 2))
                          + ln_det_precision))
+            
             if not np.isfinite(ln_verosimilitud):
                 return None
             if not componentes:
                 return float(ln_verosimilitud)
-            # Predicción CONDICIONAL: no es una validación independiente.
+            
             gp_media = proceso_gaussiano.predict(
                 rv_sin_orbita - matriz @ coeficientes, return_var=False)
             return dict(ln_verosimilitud=float(ln_verosimilitud), orbita=velocidad_orbital,
