@@ -12,8 +12,8 @@ class ModeloPlanetaCircular(ModeloActividad):
     def velocidad_orbital(self, parametros, serie):
         excentricidad, omega = self._forma_orbita(parametros)
         return velocidad_kepleriana(
-            serie.t, parametros["planeta_periodo_d"], parametros["planeta_K_m_s"],
-            excentricidad, omega, parametros["planeta_fase"], serie.t0)
+            serie.tiempos, parametros["planeta_periodo_d"], parametros["planeta_K_m_s"],
+            excentricidad, omega, parametros["planeta_fase"], serie.tiempo_referencia)
 
     def _priors_orbitales(self):
         return [

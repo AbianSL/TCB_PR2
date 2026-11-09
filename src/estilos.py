@@ -6,13 +6,13 @@ modo que la distinción nunca depende únicamente del color.
 
 # nombre del instrumento -> (color, marcador)
 ESTILOS_INSTRUMENTOS = {
-    "APF_1": ("#0072B2", "o"),
-    "COUDE-SPECTROGRAPH_1": ("#E69F00", "s"),
-    "ESPRESSO18_1": ("#009E73", "^"),
-    "HAMILTON_2": ("#CC79A7", "D"), 
-    "HARPS03_1": ("#D55E00", "v"),
-    "HARPS15_1": ("#56B4E9", "P"),
-    "HIRES_1": ("#000000", "X"),
+    "APF_1": ("#0072B2", "o"),                 # azul
+    "COUDE-SPECTROGRAPH_1": ("#E69F00", "s"),  # naranja
+    "ESPRESSO18_1": ("#009E73", "^"),          # verde azulado
+    "HAMILTON_2": ("#CC79A7", "D"),            # púrpura
+    "HARPS03_1": ("#D55E00", "v"),             # bermellón
+    "HARPS15_1": ("#56B4E9", "P"),             # azul claro
+    "HIRES_1": ("#000000", "X"),               # negro
 }
 ESTILO_INSTRUMENTO_DESCONOCIDO = ("#666666", "o")
 

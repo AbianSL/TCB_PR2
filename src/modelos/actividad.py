@@ -16,13 +16,13 @@ class ModeloActividad:
 
     def espacio_parametros(self, instrumentos, ampliados=False):
         """Priors originales; `ampliados` modifica solo Q0 y la escala lenta."""
-        priors = [(f"jitter_{i}", log_uniforme, 0.01, 100.0) for i in instrumentos]
+        priors = [(f"jitter_{instrumento}", log_uniforme, 0.01, 100.0) for instrumento in instrumentos]
         priors += self._priors_gp(ampliados)
         priors += self._priors_orbitales()
         return EspacioParametros(priors)
 
     def velocidad_orbital(self, parametros, serie):
-        return np.zeros_like(serie.t)
+        return np.zeros_like(serie.tiempos)
 
     def _priors_orbitales(self):
         return []

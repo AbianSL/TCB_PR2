@@ -19,8 +19,9 @@ class EspacioParametros:
 
     def __call__(self, cubo_unidad):
         """dynesty explora [0,1]^D; lo convertimos a parámetros físicos."""
-        return np.asarray([distribucion(u, minimo, maximo)
-                           for u, (_, distribucion, minimo, maximo) in zip(cubo_unidad, self.priors)])
+        return np.asarray([
+            distribucion(cuantil, minimo, maximo)
+            for cuantil, (_, distribucion, minimo, maximo) in zip(cubo_unidad, self.priors)])
 
-    def como_diccionario(self, theta):
-        return dict(zip(self.nombres, theta))
+    def como_diccionario(self, vector_parametros):
+        return dict(zip(self.nombres, vector_parametros))

@@ -14,11 +14,11 @@ from src.utilidades import guardar_figura, guardar_tabla
 
 
 class ACF(Analisis):
-    ANCHO_BIN_DIAS = 2.0           # separaciones temporales agrupadas cada 2 d
-    RETARDO_MAXIMO_DIAS = 100.0    # retardos de 0 a 100 d
+    ANCHO_BIN_DIAS = 2.0  
+    RETARDO_MAXIMO_DIAS = 100.0 
     RETARDO_MINIMO_BUSQUEDA_DIAS = 5.0
-    MIN_PARES_POR_BIN = 100        # mínimo de pares para representar un bin
-    QUITAR_PERIODO_LARGO = True    # retira una sinusoide lenta antes de la DCF
+    MIN_PARES_POR_BIN = 100 
+    QUITAR_PERIODO_LARGO = True
     N_PERMUTACIONES = 1000
 
     def ejecutar(self, datos, salida):
@@ -40,8 +40,8 @@ class ACF(Analisis):
                                       side="right")
         pares_por_punto = np.maximum(fin_ventana - np.arange(len(tiempos)) - 1, 0)
         primero = np.repeat(np.arange(len(tiempos), dtype=np.int32), pares_por_punto)
-        segundo = np.concatenate([np.arange(k + 1, fin_ventana[k], dtype=np.int32)
-                                  for k in np.flatnonzero(pares_por_punto)])
+        segundo = np.concatenate([np.arange(punto + 1, fin_ventana[punto], dtype=np.int32)
+                                  for punto in np.flatnonzero(pares_por_punto)])
         bin_del_par = ((tiempos[segundo] - tiempos[primero]) / self.ANCHO_BIN_DIAS
                        ).astype(np.int32)
         n_bins = int(np.ceil(self.RETARDO_MAXIMO_DIAS / self.ANCHO_BIN_DIAS))
@@ -72,10 +72,9 @@ class ACF(Analisis):
             periodos_a_quitar = (periodo_largo,)
             print(f"  Periodo largo eliminado: {periodo_largo:.1f} dias")
 
-        # Un único ajuste para toda la serie: offsets por instrumento y tendencia.
         residuos = ajustar_lineal(serie, periodos_a_quitar)["residuos"]
         retardos, primero, segundo, bin_del_par, pares_por_bin = \
-            self._agrupar_pares_por_retardo(serie.t)
+            self._agrupar_pares_por_retardo(serie.tiempos)
         dcf_observada = self._calcular_dcf(residuos, primero, segundo, bin_del_par,
                                            pares_por_bin)
 
@@ -84,11 +83,11 @@ class ACF(Analisis):
         indices_por_instrumento = [np.flatnonzero(mascara)
                                    for _, mascara in serie.instrumentos()]
         dcf_nulas = np.empty((self.N_PERMUTACIONES, len(retardos)))
-        for n in range(self.N_PERMUTACIONES):
+        for numero_permutacion in range(self.N_PERMUTACIONES):
             residuos_mezclados = residuos.copy()
             for indices in indices_por_instrumento:
                 residuos_mezclados[indices] = residuos[generador.permutation(indices)]
-            dcf_nulas[n] = self._calcular_dcf(residuos_mezclados, primero, segundo,
+            dcf_nulas[numero_permutacion] = self._calcular_dcf(residuos_mezclados, primero, segundo,
                                               bin_del_par, pares_por_bin)
 
         bin_representable = pares_por_bin >= self.MIN_PARES_POR_BIN
@@ -113,29 +112,30 @@ class ACF(Analisis):
                     banda_nula=banda_nula, retardo_pico=float(retardo_pico),
                     p_global=float(p_global))
 
-    # ---------- salida ----------
     def _guardar(self, datos, resultados, salida):
-        fig, ejes = plt.subplots(len(datos), 1, figsize=(10, 7), sharex=True)
+        figura, ejes = plt.subplots(len(datos), 1, figsize=(10, 7), sharex=True)
         filas_dcf, filas_resumen = [], []
-        for eje, (nombre_serie, r) in zip(ejes, resultados.items()):
+        for eje, (nombre_serie, resultado) in zip(ejes, resultados.items()):
             color, marcador = estilo_serie(nombre_serie)
-            filas_resumen.append([nombre_serie, r["retardo_pico"], r["p_global"],
+            filas_resumen.append([nombre_serie, resultado["retardo_pico"], resultado["p_global"],
                                   self.N_PERMUTACIONES])
-            # lag = 0 solo como referencia gráfica; no entra en el test.
-            filas_dcf.append([nombre_serie, 0.0, 1.0, len(datos[nombre_serie].t), "", ""])
+
+            filas_dcf.append([nombre_serie, 0.0, 1.0, len(datos[nombre_serie].tiempos), "", ""])
             filas_dcf += [[nombre_serie, *fila] for fila in
-                          zip(r["retardos"], r["dcf"], r["pares_por_bin"], *r["banda_nula"])]
-            eje.fill_between(r["retardos"], *r["banda_nula"], color=COLOR_BANDA_NULA,
+                          zip(resultado["retardos"], resultado["dcf"], resultado["pares_por_bin"], *resultado["banda_nula"])]
+            
+            eje.fill_between(resultado["retardos"], *resultado["banda_nula"], color=COLOR_BANDA_NULA,
                              alpha=0.3, label="Permutaciones: banda puntual del 95 %")
-            eje.plot(np.r_[0, r["retardos"]], np.r_[1, r["dcf"]], ls="-", marker=marcador,
+            eje.plot(np.r_[0, resultado["retardos"]], np.r_[1, resultado["dcf"]], ls="-", marker=marcador,
                      color=color, ms=3.5, lw=1.2, label="DCF observada")
             eje.axhline(0, color="black", lw=0.8, ls="--")
             eje.set_ylabel(f"DCF {nombre_serie}")
             eje.grid(alpha=0.2)
             eje.legend(fontsize=8)
+        
         ejes[-1].set(xlabel="Retardo temporal (dias)", xlim=(0, self.RETARDO_MAXIMO_DIAS))
-        fig.suptitle("Autocorrelacion irregular (DCF) y bandas de permutacion")
-        guardar_figura(fig, salida / "acf", dpi=180)
+        figura.suptitle("Autocorrelacion irregular (DCF) y bandas de permutacion")
+        guardar_figura(figura, salida / "acf", dpi=180)
         guardar_tabla(salida / "acf.csv",
                       ["serie", "lag_d", "dcf", "n_pares", "banda_2_5", "banda_97_5"],
                       filas_dcf)

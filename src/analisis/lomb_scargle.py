@@ -11,131 +11,164 @@ from src.analisis.base import Analisis
 from src.datos import filtrar_sigma
 from src.utilidades import guardar_figura, guardar_tabla
 
-FAP = (0.10, 0.01, 0.001)
-AZUL, NARANJA = "steelblue", "darkorange"
+NIVELES_FAP = (0.10, 0.01, 0.001)
+COLOR_AZUL, COLOR_NARANJA = "steelblue", "darkorange"
+PERIODO_MAXIMO_DIAS = 6000.0
+PERIODO_MINIMO_DIAS = 2.0
+MUESTRAS_POR_RESOLUCION_DE_FOURIER = 10
+N_PICOS_PRINCIPALES = 5
+MIN_MEDIDAS = 10
+FRECUENCIAS_POR_LOTE = 200
 
 
 class PeriodogramaLS(Analisis):
     @staticmethod
-    def _calcular_ls(t, y, dy):
+    def _calcular_ls(tiempos, valores, errores):
         """GLS ponderado, umbrales FAP y los cinco picos principales."""
-        if len(t) < 10 or np.ptp(t) <= 2:
-            raise ValueError("necesita >= 10 medidas y > 2 días de cobertura")
-        duracion = np.ptp(t)
-        pmax = min(6000.0, duracion)
-        # Diez muestras por resolución de Fourier (1/duración).
-        nfreq = int(np.ceil(10 * duracion * (1 / 2 - 1 / pmax))) + 1
-        f = np.linspace(1 / pmax, 1 / 2, nfreq)
+        duracion = np.ptp(tiempos)
+        if len(tiempos) < MIN_MEDIDAS or duracion <= PERIODO_MINIMO_DIAS:
+            raise ValueError(f"necesita >= {MIN_MEDIDAS} medidas y "
+                             f"> {PERIODO_MINIMO_DIAS:g} días de cobertura")
+        periodo_maximo = min(PERIODO_MAXIMO_DIAS, duracion)
+        n_frecuencias = int(np.ceil(
+            MUESTRAS_POR_RESOLUCION_DE_FOURIER * duracion
+            * (1 / PERIODO_MINIMO_DIAS - 1 / periodo_maximo))) + 1
+        frecuencias = np.linspace(1 / periodo_maximo, 1 / PERIODO_MINIMO_DIAS,
+                                  n_frecuencias)
 
-        ls = LombScargle(t - t.min(), y, dy, fit_mean=True, center_data=True)
-        potencia = ls.power(f)
-        niveles = [ls.false_alarm_level(fap, method="baluev",
-                                        minimum_frequency=f[0], maximum_frequency=f[-1])
-                   for fap in FAP]
+        lomb_scargle = LombScargle(tiempos - tiempos.min(), valores, errores,
+                                   fit_mean=True, center_data=True)
+        potencia = lomb_scargle.power(frecuencias)
+        umbrales_fap = [lomb_scargle.false_alarm_level(
+            nivel, method="baluev", minimum_frequency=frecuencias[0],
+            maximum_frequency=frecuencias[-1]) for nivel in NIVELES_FAP]
 
-        # Máximos locales, sin repetir el mismo pico por sobremuestreo.
-        candidatos = np.where((potencia[1:-1] > potencia[:-2]) &
-                              (potencia[1:-1] >= potencia[2:]))[0] + 1
-        candidatos = np.unique(np.r_[candidatos, np.argmax(potencia)])
+        maximos_locales = np.where((potencia[1:-1] > potencia[:-2]) &
+                                   (potencia[1:-1] >= potencia[2:]))[0] + 1
+        candidatos = np.unique(np.r_[maximos_locales, np.argmax(potencia)])
         candidatos = candidatos[np.argsort(potencia[candidatos])[::-1]]
-        mejores = []
-        for i in candidatos:
-            if all(abs(f[i] - f[j]) >= 1 / duracion for j in mejores):
-                mejores.append(int(i))
-            if len(mejores) == 5:
+        picos_elegidos = []
+        for candidato in candidatos:
+            if all(abs(frecuencias[candidato] - frecuencias[elegido]) >= 1 / duracion
+                   for elegido in picos_elegidos):
+                picos_elegidos.append(int(candidato))
+            if len(picos_elegidos) == N_PICOS_PRINCIPALES:
                 break
-        return dict(f=f, potencia=potencia, niveles=niveles, n=len(t), periodo_limite=pmax,
-                    picos=[(1 / f[i], potencia[i]) for i in mejores],
-                    pico_en_borde=bool(np.argmax(potencia) in (0, len(potencia) - 1)))
+        return dict(
+            frecuencias=frecuencias, potencia=potencia, umbrales_fap=umbrales_fap,
+            n_medidas=len(tiempos), periodo_limite=periodo_maximo,
+            picos=[(1 / frecuencias[indice_pico], potencia[indice_pico])
+                   for indice_pico in picos_elegidos],
+            pico_en_borde=bool(np.argmax(potencia) in (0, len(potencia) - 1)))
 
     @staticmethod
-    def _ventana_espectral(t, frecuencias):
+    def _potencia_ventana_muestreo(tiempos, frecuencias):
         """Ventana de muestreo: |media(exp(2*pi*i*f*t))|^2."""
-        t = t - t.min()
+        tiempos = tiempos - tiempos.min()
         potencia = np.empty(len(frecuencias))
-        for inicio in range(0, len(frecuencias), 200):
-            fases = 2 * np.pi * frecuencias[inicio:inicio + 200, None] * t[None, :]
-            potencia[inicio:inicio + 200] = (np.mean(np.cos(fases), axis=1) ** 2
-                                             + np.mean(np.sin(fases), axis=1) ** 2)
+        for inicio in range(0, len(frecuencias), FRECUENCIAS_POR_LOTE):
+            lote = slice(inicio, inicio + FRECUENCIAS_POR_LOTE)
+            fases = 2 * np.pi * frecuencias[lote, None] * tiempos[None, :]
+            potencia[lote] = (np.mean(np.cos(fases), axis=1) ** 2
+                              + np.mean(np.sin(fases), axis=1) ** 2)
         return potencia
 
     @staticmethod
-    def _dibujar_periodogramas(curvas, titulo, ruta, rotacion=False):
+    def _dibujar_periodogramas(curvas, titulo, ruta, marcar_rotacion=False):
         """`curvas` = [(resultado, etiqueta, color)]. Marca FAP 1 % y el pico máximo."""
-        fig, ax = plt.subplots(figsize=(8, 4))
-        for res, etiqueta, color in curvas:
-            ax.plot(1 / res["f"], res["potencia"], color=color, label=etiqueta)
-            ax.axhline(res["niveles"][1], ls="--", lw=1, color=color,
-                       label=f"FAP 1 % ({etiqueta})")
-            ax.axvline(res["picos"][0][0], ls=":", lw=0.8, color=color)
-        if rotacion:
-            ax.axvspan(11.35, 11.55, color="gray", alpha=0.2, label="Rotación (literatura)")
-        ax.set(xscale="log", xlim=(2, min(r["periodo_limite"] for r, _, _ in curvas)),
-               xlabel="Periodo (d)", ylabel="Potencia Lomb-Scargle", title=titulo)
-        ax.legend(fontsize=8)
-        guardar_figura(fig, ruta, formatos=(".png", ".pdf"), dpi=250)
+        figura, eje = plt.subplots(figsize=(8, 4))
+        for resultado, etiqueta, color in curvas:
+            eje.plot(1 / resultado["frecuencias"], resultado["potencia"],
+                     color=color, label=etiqueta)
+            eje.axhline(resultado["umbrales_fap"][1], ls="--", lw=1, color=color,
+                        label=f"FAP 1 % ({etiqueta})")
+            eje.axvline(resultado["picos"][0][0], ls=":", lw=0.8, color=color)
+        if marcar_rotacion:
+            eje.axvspan(11.35, 11.55, color="gray", alpha=0.2,
+                        label="Rotación (literatura)")
+        eje.set(xscale="log",
+                xlim=(PERIODO_MINIMO_DIAS,
+                      min(resultado["periodo_limite"] for resultado, _, _ in curvas)),
+                xlabel="Periodo (d)", ylabel="Potencia Lomb-Scargle", title=titulo)
+        eje.legend(fontsize=8)
+        guardar_figura(figura, ruta, formatos=(".png", ".pdf"), dpi=250)
 
     @staticmethod
-    def _dibujar_ventana(t, titulo, ruta):
-        fig, ejes = plt.subplots(1, 2, figsize=(10, 3.5))
-        for eje, f, ref, texto in ((ejes[0], np.linspace(1 / 2000, 0.02, 1600), 1 / 365.25, "1 año"),
-                                   (ejes[1], np.linspace(0.02, 1.05, 4000), 1.0, "1 día")):
-            eje.plot(f, PeriodogramaLS._ventana_espectral(t, f), color="black")
-            eje.axvline(ref, color=NARANJA, ls="--", label=texto)
+    def _dibujar_ventana(tiempos, titulo, ruta):
+        figura, ejes = plt.subplots(1, 2, figsize=(10, 3.5))
+        tramos = ((ejes[0], np.linspace(1 / 2000, 0.02, 1600), 1 / 365.25, "1 año"),
+                  (ejes[1], np.linspace(0.02, 1.05, 4000), 1.0, "1 día"))
+        for eje, frecuencias, frecuencia_referencia, etiqueta in tramos:
+            eje.plot(frecuencias,
+                     PeriodogramaLS._potencia_ventana_muestreo(tiempos, frecuencias),
+                     color="black")
+            eje.axvline(frecuencia_referencia, color=COLOR_NARANJA, ls="--",
+                        label=etiqueta)
             eje.set(xlabel="Frecuencia (1/d)", ylabel="Potencia ventana")
             eje.legend(fontsize=8)
-        fig.suptitle(titulo)
-        guardar_figura(fig, ruta, formatos=(".png", ".pdf"), dpi=250)
+        figura.suptitle(titulo)
+        guardar_figura(figura, ruta, formatos=(".png", ".pdf"), dpi=250)
 
     def ejecutar(self, datos, salida):
         series = {("RV", "Original"): datos["RV"],
                   ("S_MW", "Original"): datos["S_MW"],
                   ("S_MW", "Filtrada"): filtrar_sigma(datos["S_MW"])}
-        resultados, resumen, picos = {}, [], []
-        for (obs, sel), serie in series.items():
-            for inst, m in serie.instrumentos():
+        resultados, filas_resumen, filas_picos = {}, [], []
+        for (observable, seleccion), serie in series.items():
+            for instrumento, mascara in serie.instrumentos():
                 try:
-                    res = self._calcular_ls(serie.t[m], serie.y[m], serie.err[m])
+                    resultado = self._calcular_ls(
+                        serie.tiempos[mascara], serie.valores[mascara],
+                        serie.errores_formales[mascara])
                 except ValueError as error:
-                    print(f"{obs:4} {inst:23} {sel:9} omitido: {error}")
+                    print(f"{observable:4} {instrumento:23} {seleccion:9} omitido: {error}")
                     continue
-                resultados[(obs, sel, inst)] = res
-                periodo, potencia = res["picos"][0]
-                supera = potencia > res["niveles"][1]
-                resumen.append([obs, sel, inst, res["n"], periodo, potencia,
-                                *res["niveles"], supera, res["pico_en_borde"]])
-                picos += [[obs, sel, inst, rango, p, a, a > res["niveles"][1]]
-                          for rango, (p, a) in enumerate(res["picos"], start=1)]
-                print(f"{obs:4} {inst:23} {sel:9} P = {periodo:9.3f} d | "
-                      f"supera FAP 1 %: {supera}")
+                resultados[(observable, seleccion, instrumento)] = resultado
+                periodo_maximo, potencia_maxima = resultado["picos"][0]
+                umbral_fap_1 = resultado["umbrales_fap"][1]
+                supera_fap_1 = potencia_maxima > umbral_fap_1
+                filas_resumen.append([
+                    observable, seleccion, instrumento, resultado["n_medidas"],
+                    periodo_maximo, potencia_maxima, *resultado["umbrales_fap"],
+                    supera_fap_1, resultado["pico_en_borde"]])
+                filas_picos += [
+                    [observable, seleccion, instrumento, rango, periodo, potencia,
+                     potencia > umbral_fap_1]
+                    for rango, (periodo, potencia) in enumerate(resultado["picos"], start=1)]
+                print(f"{observable:4} {instrumento:23} {seleccion:9} "
+                      f"P = {periodo_maximo:9.3f} d | supera FAP 1 %: {supera_fap_1}")
 
-        # Figuras: RV, actividad original vs filtrada, y RV vs actividad filtrada.
-        for inst in sorted({clave[2] for clave in resultados}):
-            rv = resultados.get(("RV", "Original", inst))
-            orig = resultados.get(("S_MW", "Original", inst))
-            filt = resultados.get(("S_MW", "Filtrada", inst))
-            if rv:
-                self._dibujar_periodogramas([(rv, "RV", AZUL)], f"RV: {inst}",
-                                      salida / "RV" / inst)
-            if orig and filt:
-                self._dibujar_periodogramas([(orig, "Original", AZUL),
-                                       (filt, "Filtrada a 5 sigma", NARANJA)],
-                                      f"Actividad: {inst}", salida / "actividad" / inst)
-            if rv and filt:
-                self._dibujar_periodogramas([(rv, "RV", AZUL), (filt, "Actividad filtrada", NARANJA)],
-                                      f"RV frente a actividad: {inst}",
-                                      salida / "RV_vs_actividad" / inst, rotacion=True)
-        # La ventana depende solo de los instantes, no de los valores.
-        for obs in ("RV", "S_MW"):
-            for inst, m in datos[obs].instrumentos():
-                self._dibujar_ventana(datos[obs].t[m], f"Ventana: {obs} - {inst}",
-                                salida / "ventanas" / obs / inst)
+        for instrumento in sorted({clave[2] for clave in resultados}):
+            resultado_rv = resultados.get(("RV", "Original", instrumento))
+            actividad_original = resultados.get(("S_MW", "Original", instrumento))
+            actividad_filtrada = resultados.get(("S_MW", "Filtrada", instrumento))
+            if resultado_rv:
+                self._dibujar_periodogramas(
+                    [(resultado_rv, "RV", COLOR_AZUL)], f"RV: {instrumento}",
+                    salida / "RV" / instrumento)
+            if actividad_original and actividad_filtrada:
+                self._dibujar_periodogramas(
+                    [(actividad_original, "Original", COLOR_AZUL),
+                     (actividad_filtrada, "Filtrada a 5 sigma", COLOR_NARANJA)],
+                    f"Actividad: {instrumento}", salida / "actividad" / instrumento)
+            if resultado_rv and actividad_filtrada:
+                self._dibujar_periodogramas(
+                    [(resultado_rv, "RV", COLOR_AZUL),
+                     (actividad_filtrada, "Actividad filtrada", COLOR_NARANJA)],
+                    f"RV frente a actividad: {instrumento}",
+                    salida / "RV_vs_actividad" / instrumento, marcar_rotacion=True)
+        
+        for observable in ("RV", "S_MW"):
+            for instrumento, mascara in datos[observable].instrumentos():
+                self._dibujar_ventana(datos[observable].tiempos[mascara],
+                                      f"Ventana: {observable} - {instrumento}",
+                                      salida / "ventanas" / observable / instrumento)
 
         guardar_tabla(salida / "resumen_ls.csv",
                       ["serie", "seleccion", "instrumento", "N", "periodo_maximo_d",
                        "potencia_maxima", "FAP_10", "FAP_1", "FAP_0_1",
-                       "supera_FAP_1", "maximo_en_borde"], resumen)
+                       "supera_FAP_1", "maximo_en_borde"], filas_resumen)
         guardar_tabla(salida / "picos_ls.csv",
                       ["serie", "seleccion", "instrumento", "rango", "periodo_d",
-                       "potencia", "supera_umbral_FAP_1"], picos)
+                       "potencia", "supera_umbral_FAP_1"], filas_picos)
         print(f"\nResultados guardados en {salida}/")
